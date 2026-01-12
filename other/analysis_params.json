@@ -1,0 +1,5 @@
+{
+    "min_threshold_intensity": 100,
+    "min_threshold_area":200,
+    "element_list": ["Fe", "Ca", "S"]
+  }
