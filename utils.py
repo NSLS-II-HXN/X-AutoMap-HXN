@@ -572,60 +572,6 @@ def process_and_save_json(input_path, overlap_thresh=0.5):
     print(f"✅ Merged JSON saved to: {output_path}")
     return output_path
 
-
-
-
-
-def detect_blobs_(img_norm, img_orig, min_thresh, min_area, color, file_name):
-    # --- Threshold the image to binary ---
-    _, binary = cv2.threshold(img_norm, min_thresh, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    kernel = np.ones((2, 2), np.uint8)
-    binary = cv2.dilate(binary, kernel, iterations=1)
-
-
-    # --- Find external contours ---
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    blobs = []
-    height, width = img_orig.shape[:2]
-
-    for idx, cnt in enumerate(contours, start=1):
-        area = cv2.contourArea(cnt)
-        if area < min_area or area > 200:  # Replace 100 with a max_area if needed
-            continue
-
-        # Bounding rectangle for the contour
-        x, y, w, h = cv2.boundingRect(cnt)
-        cx, cy = x + w // 2, y + h // 2
-        radius = int(max(w, h) / 2)
-        box_size = 2 * radius
-        box_x, box_y = cx - radius, cy - radius
-
-        # Clip to image dimensions
-        x1, y1 = max(0, box_x), max(0, box_y)
-        x2, y2 = min(width, cx + radius), min(height, cy + radius)
-
-        roi_orig = img_orig[y1:y2, x1:x2]
-        roi_dilated = img_norm[y1:y2, x1:x2]
-
-        if roi_orig.size > 0:
-            blobs.append({
-                'Box': f"{file_name} Box #{idx}",
-                'center': (cx, cy),
-                'radius': radius,
-                'color': color,
-                'file': file_name,
-                'max_intensity': roi_orig.max(),
-                'mean_intensity': roi_orig.mean(),
-                'mean_dilation': float(roi_dilated.mean()),
-                'box_x': box_x,
-                'box_y': box_y,
-                'box_size': box_size
-            })
-
-    return blobs
-
 def detect_blobs(img_norm, img_orig, min_thresh, min_area, color, file_name):
     params = cv2.SimpleBlobDetector_Params()
     params.minThreshold = min_thresh
@@ -1436,7 +1382,10 @@ def submit_and_export(**params):
     real_test=1: Full beamline control (RM, db, send_fly2d_to_queue).
     real_test=0: Simulation. Prints commands and waits for manual file placement.
     """
-    is_real = params.get('real_test', 0) == 1
+    mode = params.get('real_test', 0)
+    is_real = (mode == 1)
+    is_sim  = (mode == 0)
+    is_offline = (mode == 2)
     
     # 1) enqueue
     label = params.get('label', '')
@@ -1459,7 +1408,7 @@ def submit_and_export(**params):
     if is_real:
         send_fly2d_to_queue(**clean_params)
     else:
-        print(f"[SIM] Would call: send_fly2d_to_queue(**{clean_params})")
+        print(f"[SIM/OFFLINE] Would call: send_fly2d_to_queue(**{clean_params})")
     
     # 2) wait for scan to finish
     if is_real:
@@ -1471,7 +1420,7 @@ def submit_and_export(**params):
             time.sleep(1.0)
         print("[WAIT] scan complete.")
     else:
-        print("[SIM] Skipping RM.status() wait loop. Assuming scan finished.")
+        print("[SIM/OFFLINE] Skipping RM.status() wait loop. Assuming scan finished.")
 
     # 3) get scan_id and prepare output folder
     data_wd = params.get('data_wd', '.')
@@ -1479,9 +1428,13 @@ def submit_and_export(**params):
     if is_real:
         hdr = db[-1]
         last_id = hdr.start['scan_id']
+    elif is_offline:
+        last_id = params.get('target_id')
+        print(f"[OFFLINE] Using fixed target ID: {last_id}")
+
     else:
         # Fixed dummy ID for simulation so you know where to paste files
-        last_id = 341431 
+        last_id = 111111 
         print(f"[SIM] Using fixed dummy ID: {last_id}")
 
     out_dir = os.path.join(data_wd, f"automap_{last_id}")
@@ -1492,7 +1445,7 @@ def submit_and_export(**params):
     all_elem_list = params.get('elem_list', [])
 
     # 4 & 5) Export Data (Real) vs Wait for Data (Sim)
-    if is_real:
+    if is_real or is_offline:
         # --- REAL MODE: Generate files automatically ---
         for elem_list in all_elem_list:
             export_xrf_roi_data(
@@ -1700,7 +1653,7 @@ def submit_and_export(**params):
         print("[SIM] Would call wait_for_queue_done().")
 
 
-def load_and_queue(json_path, real_test):
+def load_and_queue(json_path, real_test,target_id=None):
     """
     Load scan parameters from JSON, compute necessary fields,
     and either enqueue only or enqueue+export based on a flag.
@@ -1737,6 +1690,8 @@ def load_and_queue(json_path, real_test):
 
     # 6) Dispatch
     params['real_test'] = real_test
+    if target_id is not None:
+        params['target_id'] = target_id
     submit_and_export(**params)
 
 
