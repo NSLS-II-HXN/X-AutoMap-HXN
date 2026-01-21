@@ -1464,7 +1464,7 @@ def submit_and_export(**params):
     else:
         # --- SIM MODE: Wait for manual paste ---
         params_file_name = f"scan_{last_id}_params.json"
-        params_full_path = os.path.join(out_dir, params_file_name)
+        
         
         print("\n" + "!"*60)
         print(f"[SIMULATION PAUSE] Waiting for data...")
@@ -1474,7 +1474,7 @@ def submit_and_export(**params):
 
         while True:
             # Check if params exists
-            #has_params = os.path.isfile(params_full_path)
+            
             # Check if at least one TIFF exists
             tiffs_in_dir = list(Path(out_dir).glob("*.tiff")) + list(Path(out_dir).glob("*.tif"))
             
