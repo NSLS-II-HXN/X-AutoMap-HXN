@@ -16,17 +16,35 @@ from skimage.measure import shannon_entropy
 import cv2
 import numpy as np
 import tifffile as tiff
+import time
 
 from hxntools.CompositeBroker import db
 
 ## CREATING TILED CLIENT FOR NOW HERE GLOBALLY
 
-import time
-from tiled.client import from_uri
+class RemoteSegmentation:
+    def __init__(self):
+    
+        from tiled.client import from_uri
 
-client = from_uri('https://tiled-staging.nsls2.bnl.gov')
-remote_writer = client['tst/sandbox/ptycho_test']
-segapp_elems = []
+        self.client = from_uri('https://tiled-staging.nsls2.bnl.gov')
+        self.writer = self.client['tst/sandbox/ptycho_test']
+        self.segapp_elems = []
+
+    def clear_cache(self):
+        self.segapp_elems = []
+    
+    def append_cache(self, elem):
+        self.segapp_elems.append(elem)
+    
+    def get_cache(self):
+        return self.segapp_elems
+    
+    def write(self, data):
+        self.writer.write_array(data)
+
+# Create a global instance of this class
+remote_handler = RemoteSegmentation() 
 
 # # make if else for rea_state
 # try:
@@ -1061,15 +1079,14 @@ def export_xrf_roi_data(scan_id, norm = 'sclr1_ch4', elem_list = [], wd = '.', r
 
     if remote_seg:
         for elem in sorted(elem_list):
-            if elem not in segapp_elems:
-                segapp_elems.append(elem)
+            if elem not in remote_handler.get_cache():
+                remote_handler.append_cache(elem)
                 roi_keys = [f'Det{chan}_{elem}' for chan in channels]
                 spectrum = np.sum([np.array(list(hdr.data(roi)), dtype=np.float32).squeeze() for roi in roi_keys], axis=0)
                 if norm !=None:
                     spectrum = spectrum/scalar
                 xrf_img = spectrum.reshape(scan_dim)
-                remote_writer.write_array(xrf_img)
-                #tiff.imwrite(os.path.join(wd,f"scan_{scan_id}_{elem}.tiff"), xrf_img)
+                remote_handler.write(xrf_img)
     else:
 
         for elem in sorted(elem_list):
@@ -1686,6 +1703,8 @@ def load_and_queue(json_path, real_test,target_id=None, remote_seg=False):
 
     JSON can include an optional 'block_and_export': true to wait and post-process.
     """
+    remote_handler.clear_cache() # clear the elements in the cache appended in previous call
+
     # 1) Read main params
     with open(json_path, 'r') as f:
         params = json.load(f)
