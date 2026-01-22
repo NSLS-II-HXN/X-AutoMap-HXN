@@ -17,6 +17,17 @@ import cv2
 import numpy as np
 import tifffile as tiff
 
+from hxntools.CompositeBroker import db
+
+## CREATING TILED CLIENT FOR NOW HERE GLOBALLY
+
+import time
+from tiled.client import from_uri
+
+client = from_uri('https://tiled-staging.nsls2.bnl.gov')
+remote_writer = client['tst/sandbox/ptycho_test']
+segapp_elems = []
+
 # # make if else for rea_state
 # try:
 #     from bluesky_queueserver_api import BPlan
@@ -1030,7 +1041,7 @@ def _get_flyscan_dimensions(hdr):
     else:
         raise ValueError("Unknown scan type for _get_flyscan_dimensions")
 
-def export_xrf_roi_data(scan_id, norm = 'sclr1_ch4', elem_list = [], wd = '.', real_test=0):
+def export_xrf_roi_data(scan_id, norm = 'sclr1_ch4', elem_list = [], wd = '.', real_test=0, remote_seg=False):
 
     if real_test == 0:
         print("[EXPORT] Skipping XRF ROI data export in test mode.")
@@ -1048,13 +1059,26 @@ def export_xrf_roi_data(scan_id, norm = 'sclr1_ch4', elem_list = [], wd = '.', r
     scalar = np.array(list(hdr.data(norm))).squeeze()
     print(f"[DATA] fetching scalar {norm} values done")
 
-    for elem in sorted(elem_list):
-        roi_keys = [f'Det{chan}_{elem}' for chan in channels]
-        spectrum = np.sum([np.array(list(hdr.data(roi)), dtype=np.float32).squeeze() for roi in roi_keys], axis=0)
-        if norm !=None:
-            spectrum = spectrum/scalar
-        xrf_img = spectrum.reshape(scan_dim)
-        tiff.imwrite(os.path.join(wd,f"scan_{scan_id}_{elem}.tiff"), xrf_img)
+    if remote_seg:
+        for elem in sorted(elem_list):
+            if elem not in segapp_elems:
+                segapp_elems.append(elem)
+                roi_keys = [f'Det{chan}_{elem}' for chan in channels]
+                spectrum = np.sum([np.array(list(hdr.data(roi)), dtype=np.float32).squeeze() for roi in roi_keys], axis=0)
+                if norm !=None:
+                    spectrum = spectrum/scalar
+                xrf_img = spectrum.reshape(scan_dim)
+                remote_writer.write_array(xrf_img)
+                #tiff.imwrite(os.path.join(wd,f"scan_{scan_id}_{elem}.tiff"), xrf_img)
+    else:
+
+        for elem in sorted(elem_list):
+            roi_keys = [f'Det{chan}_{elem}' for chan in channels]
+            spectrum = np.sum([np.array(list(hdr.data(roi)), dtype=np.float32).squeeze() for roi in roi_keys], axis=0)
+            if norm !=None:
+                spectrum = spectrum/scalar
+            xrf_img = spectrum.reshape(scan_dim)
+            tiff.imwrite(os.path.join(wd,f"scan_{scan_id}_{elem}.tiff"), xrf_img)
 
 
 def export_scan_params(sid=-1, zp_flag=True, save_to=None, real_test=0):
@@ -1386,7 +1410,8 @@ def submit_and_export(**params):
     is_real = (mode == 1)
     is_sim  = (mode == 0)
     is_offline = (mode == 2)
-    
+    is_remote = params.get('remote_seg', 0)
+
     # 1) enqueue
     label = params.get('label', '')
     print(f"[{'REAL' if is_real else 'SIM'}] [SUBMIT] queueing scan '{label}' …")
@@ -1453,7 +1478,8 @@ def submit_and_export(**params):
                 norm=params.get('export_norm', 'sclr1_ch4'),
                 elem_list=elem_list,
                 wd=out_dir,
-                real_test=1
+                real_test=1,
+                remote_seg=is_remote
             )
         export_scan_params(
             sid=last_id,
@@ -1653,7 +1679,7 @@ def submit_and_export(**params):
         print("[SIM] Would call wait_for_queue_done().")
 
 
-def load_and_queue(json_path, real_test,target_id=None):
+def load_and_queue(json_path, real_test,target_id=None, remote_seg=False):
     """
     Load scan parameters from JSON, compute necessary fields,
     and either enqueue only or enqueue+export based on a flag.
@@ -1690,6 +1716,7 @@ def load_and_queue(json_path, real_test,target_id=None):
 
     # 6) Dispatch
     params['real_test'] = real_test
+    params['remote_seg'] = remote_seg
     if target_id is not None:
         params['target_id'] = target_id
     submit_and_export(**params)
