@@ -1409,6 +1409,7 @@ def wait_for_queue_done(poll_interval=5.0, idle_timeout=60, auto_restart=True):
 
         print(".", end="", flush=True)
         time.sleep(poll_interval)
+
 def submit_and_export(**params):
     """
     Step 1: Enqueue scan (if real), wait (if real), export data (real/offline).
