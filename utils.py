@@ -16,6 +16,35 @@ from skimage.measure import shannon_entropy
 import cv2
 import numpy as np
 import tifffile as tiff
+import time
+
+from hxntools.CompositeBroker import db
+
+## CREATING TILED CLIENT FOR NOW HERE GLOBALLY
+
+class RemoteSegmentation:
+    def __init__(self):
+    
+        from tiled.client import from_uri
+
+        self.client = from_uri('https://tiled.nsls2.bnl.gov')
+        self.writer = self.client['tst/sandbox/synaps']
+        self.segapp_elems = []
+
+    def clear_cache(self):
+        self.segapp_elems.clear()
+    
+    def append_cache(self, elem):
+        self.segapp_elems.append(elem)
+    
+    def get_cache(self):
+        return self.segapp_elems
+    
+    def write(self, data):
+        self.writer.write_array(data)
+
+# Create a global instance of this class
+remote_handler = RemoteSegmentation() 
 
 # # make if else for rea_state
 # try:
@@ -1030,7 +1059,7 @@ def _get_flyscan_dimensions(hdr):
     else:
         raise ValueError("Unknown scan type for _get_flyscan_dimensions")
 
-def export_xrf_roi_data(scan_id, norm = 'sclr1_ch4', elem_list = [], wd = '.', real_test=0):
+def export_xrf_roi_data(scan_id, norm = 'sclr1_ch4', elem_list = [], wd = '.', real_test=0, remote_seg=False):
 
     if real_test == 0:
         print("[EXPORT] Skipping XRF ROI data export in test mode.")
@@ -1048,13 +1077,25 @@ def export_xrf_roi_data(scan_id, norm = 'sclr1_ch4', elem_list = [], wd = '.', r
     scalar = np.array(list(hdr.data(norm))).squeeze()
     print(f"[DATA] fetching scalar {norm} values done")
 
-    for elem in sorted(elem_list):
-        roi_keys = [f'Det{chan}_{elem}' for chan in channels]
-        spectrum = np.sum([np.array(list(hdr.data(roi)), dtype=np.float32).squeeze() for roi in roi_keys], axis=0)
-        if norm !=None:
-            spectrum = spectrum/scalar
-        xrf_img = spectrum.reshape(scan_dim)
-        tiff.imwrite(os.path.join(wd,f"scan_{scan_id}_{elem}.tiff"), xrf_img)
+    if remote_seg:
+        for elem in sorted(elem_list):
+            if elem not in remote_handler.get_cache():
+                remote_handler.append_cache(elem)
+                roi_keys = [f'Det{chan}_{elem}' for chan in channels]
+                spectrum = np.sum([np.array(list(hdr.data(roi)), dtype=np.float32).squeeze() for roi in roi_keys], axis=0)
+                if norm !=None:
+                    spectrum = spectrum/scalar
+                xrf_img = spectrum.reshape(scan_dim)
+                remote_handler.write(xrf_img)
+    else:
+
+        for elem in sorted(elem_list):
+            roi_keys = [f'Det{chan}_{elem}' for chan in channels]
+            spectrum = np.sum([np.array(list(hdr.data(roi)), dtype=np.float32).squeeze() for roi in roi_keys], axis=0)
+            if norm !=None:
+                spectrum = spectrum/scalar
+            xrf_img = spectrum.reshape(scan_dim)
+            tiff.imwrite(os.path.join(wd,f"scan_{scan_id}_{elem}.tiff"), xrf_img)
 
 
 def export_scan_params(sid=-1, zp_flag=True, save_to=None, real_test=0):
@@ -1386,7 +1427,8 @@ def submit_and_export(**params):
     is_real = (mode == 1)
     is_sim  = (mode == 0)
     is_offline = (mode == 2)
-    
+    is_remote = params.get('remote_seg', 0)
+
     # 1) enqueue
     label = params.get('label', '')
     print(f"[{'REAL' if is_real else 'SIM'}] [SUBMIT] queueing scan '{label}' …")
@@ -1453,7 +1495,8 @@ def submit_and_export(**params):
                 norm=params.get('export_norm', 'sclr1_ch4'),
                 elem_list=elem_list,
                 wd=out_dir,
-                real_test=1
+                real_test=1,
+                remote_seg=is_remote
             )
         export_scan_params(
             sid=last_id,
@@ -1653,13 +1696,15 @@ def submit_and_export(**params):
         print("[SIM] Would call wait_for_queue_done().")
 
 
-def load_and_queue(json_path, real_test,target_id=None):
+def load_and_queue(json_path, real_test,target_id=None, remote_seg=False):
     """
     Load scan parameters from JSON, compute necessary fields,
     and either enqueue only or enqueue+export based on a flag.
 
     JSON can include an optional 'block_and_export': true to wait and post-process.
     """
+    remote_handler.clear_cache() # clear the elements in the cache appended in previous call
+
     # 1) Read main params
     with open(json_path, 'r') as f:
         params = json.load(f)
@@ -1690,6 +1735,7 @@ def load_and_queue(json_path, real_test,target_id=None):
 
     # 6) Dispatch
     params['real_test'] = real_test
+    params['remote_seg'] = remote_seg
     if target_id is not None:
         params['target_id'] = target_id
     submit_and_export(**params)
