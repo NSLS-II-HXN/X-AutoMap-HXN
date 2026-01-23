@@ -1059,43 +1059,95 @@ def _get_flyscan_dimensions(hdr):
     else:
         raise ValueError("Unknown scan type for _get_flyscan_dimensions")
 
-def export_xrf_roi_data(scan_id, norm = 'sclr1_ch4', elem_list = [], wd = '.', real_test=0, remote_seg=False):
-
+def _export_xrf_remote(scan_id, norm='sclr1_ch4', elem_list=[], real_test=0):
+    """
+    Export XRF data to remote handler for remote segmentation.
+    
+    Args:
+        scan_id: Scan ID to export
+        norm: Normalization channel (default: 'sclr1_ch4')
+        elem_list: List of elements to export
+        real_test: 0 for test mode (skip export), 1 for real export
+    """
     if real_test == 0:
-        print("[EXPORT] Skipping XRF ROI data export in test mode.")
+        print("[EXPORT] Skipping remote XRF export in test mode.")
         return
 
     hdr = db[int(scan_id)]
     scan_id = hdr.start["scan_id"]
-   
+    
     channels = [1, 2, 3]
-    print(f"{elem_list = }")
-    print(f"[DATA] fetching XRF ROIs")
+    print(f"[REMOTE] {elem_list = }")
+    print(f"[REMOTE] fetching XRF ROIs")
     scan_dim = _get_flyscan_dimensions(hdr)
-    print(f"[DATA] fetching scalar values")
+    print(f"[REMOTE] fetching scalar values")
 
     scalar = np.array(list(hdr.data(norm))).squeeze()
-    print(f"[DATA] fetching scalar {norm} values done")
-
-    if remote_seg:
-        for elem in sorted(elem_list):
-            if elem not in remote_handler.get_cache():
-                remote_handler.append_cache(elem)
-                roi_keys = [f'Det{chan}_{elem}' for chan in channels]
-                spectrum = np.sum([np.array(list(hdr.data(roi)), dtype=np.float32).squeeze() for roi in roi_keys], axis=0)
-                if norm !=None:
-                    spectrum = spectrum/scalar
-                xrf_img = spectrum.reshape(scan_dim)
-                remote_handler.write(xrf_img)
-    else:
-
-        for elem in sorted(elem_list):
+    print(f"[REMOTE] fetching scalar {norm} values done")
+    
+    for elem in sorted(elem_list):
+        if elem not in remote_handler.get_cache():
+            remote_handler.append_cache(elem)
             roi_keys = [f'Det{chan}_{elem}' for chan in channels]
             spectrum = np.sum([np.array(list(hdr.data(roi)), dtype=np.float32).squeeze() for roi in roi_keys], axis=0)
-            if norm !=None:
-                spectrum = spectrum/scalar
+            if norm is not None:
+                spectrum = spectrum / scalar
             xrf_img = spectrum.reshape(scan_dim)
-            tiff.imwrite(os.path.join(wd,f"scan_{scan_id}_{elem}.tiff"), xrf_img)
+            remote_handler.write(xrf_img)
+
+
+def _export_xrf_local(scan_id, norm='sclr1_ch4', elem_list=[], wd='.', real_test=0):
+    """
+    Export XRF data as local TIFF files.
+    
+    Args:
+        scan_id: Scan ID to export
+        norm: Normalization channel (default: 'sclr1_ch4')
+        elem_list: List of elements to export
+        wd: Working directory for output files
+        real_test: 0 for test mode (skip export), 1 for real export
+    """
+    if real_test == 0:
+        print("[EXPORT] Skipping local XRF export in test mode.")
+        return
+
+    hdr = db[int(scan_id)]
+    scan_id = hdr.start["scan_id"]
+    
+    channels = [1, 2, 3]
+    print(f"[LOCAL] {elem_list = }")
+    print(f"[LOCAL] fetching XRF ROIs")
+    scan_dim = _get_flyscan_dimensions(hdr)
+    print(f"[LOCAL] fetching scalar values")
+
+    scalar = np.array(list(hdr.data(norm))).squeeze()
+    print(f"[LOCAL] fetching scalar {norm} values done")
+    
+    for elem in sorted(elem_list):
+        roi_keys = [f'Det{chan}_{elem}' for chan in channels]
+        spectrum = np.sum([np.array(list(hdr.data(roi)), dtype=np.float32).squeeze() for roi in roi_keys], axis=0)
+        if norm is not None:
+            spectrum = spectrum / scalar
+        xrf_img = spectrum.reshape(scan_dim)
+        tiff.imwrite(os.path.join(wd, f"scan_{scan_id}_{elem}.tiff"), xrf_img)
+
+
+def export_xrf_roi_data(scan_id, norm='sclr1_ch4', elem_list=[], wd='.', real_test=0, remote_seg=False):
+    """
+    Export XRF ROI data either remotely or as local TIFF files.
+    
+    Args:
+        scan_id: Scan ID to export
+        norm: Normalization channel (default: 'sclr1_ch4')
+        elem_list: List of elements to export
+        wd: Working directory for local export
+        real_test: 0 for test mode (skip export), 1 for real export
+        remote_seg: If True, use remote handler; if False, write local TIFFs
+    """
+    if remote_seg:
+        _export_xrf_remote(scan_id, norm, elem_list, real_test)
+    else:
+        _export_xrf_local(scan_id, norm, elem_list, wd, real_test)
 
 
 def export_scan_params(sid=-1, zp_flag=True, save_to=None, real_test=0):
@@ -1409,6 +1461,7 @@ def wait_for_queue_done(poll_interval=5.0, idle_timeout=60, auto_restart=True):
 
         print(".", end="", flush=True)
         time.sleep(poll_interval)
+
 def submit_and_export(**params):
     """
     Step 1: Enqueue scan (if real), wait (if real), export data (real/offline).
