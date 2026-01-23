@@ -27,12 +27,12 @@ class RemoteSegmentation:
     
         from tiled.client import from_uri
 
-        self.client = from_uri('https://tiled-staging.nsls2.bnl.gov')
-        self.writer = self.client['tst/sandbox/ptycho_test']
+        self.client = from_uri('https://tiled.nsls2.bnl.gov')
+        self.writer = self.client['tst/sandbox/synaps']
         self.segapp_elems = []
 
     def clear_cache(self):
-        self.segapp_elems = []
+        self.segapp_elems.clear()
     
     def append_cache(self, elem):
         self.segapp_elems.append(elem)
