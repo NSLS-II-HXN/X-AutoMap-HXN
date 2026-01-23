@@ -1409,62 +1409,55 @@ def wait_for_queue_done(poll_interval=5.0, idle_timeout=60, auto_restart=True):
 
         print(".", end="", flush=True)
         time.sleep(poll_interval)
-
-
-
-
-
 def submit_and_export(**params):
     """
-    Enqueue a scan, wait for completion, then export XRF TIFFs and ROI JSON
-    into a single folder automap_{scan_id} under data_wd.
-    
-    Modes:
-    real_test=1: Full beamline control (RM, db, send_fly2d_to_queue).
-    real_test=0: Simulation. Prints commands and waits for manual file placement.
+    Step 1: Enqueue scan (if real), wait (if real), export data (real/offline).
+    Returns: (last_id, out_dir)
     """
     mode = params.get('real_test', 0)
     is_real = (mode == 1)
     is_sim  = (mode == 0)
     is_offline = (mode == 2)
-    is_remote = params.get('remote_seg', 0)
-
-    # 1) enqueue
-    label = params.get('label', '')
-    print(f"[{'REAL' if is_real else 'SIM'}] [SUBMIT] queueing scan '{label}' …")
-    print(f"{params = }")
-
-    # Clean params logic (runs in both modes)
-    try:
-        valid_keys = inspect.signature(send_fly2d_to_queue).parameters.keys()
-        clean_params = {k: v for k, v in params.items() if k in valid_keys}
-    except NameError:
-        # If running locally where beamline functions aren't imported
-        clean_params = params
-        
-    print(f" check 1")
-    print(f" {clean_params = }")
-
-    time.sleep(1 if not is_real else 5)
-
-    if is_real:
-        send_fly2d_to_queue(**clean_params)
-    else:
-        print(f"[SIM/OFFLINE] Would call: send_fly2d_to_queue(**{clean_params})")
     
-    # 2) wait for scan to finish
+    # Pass remote_seg to the export function
+    is_remote = params.get('remote_seg', False)
+
+    # --- 1. Enqueue (Real Only) ---
+    label = params.get('label', '')
+    
     if is_real:
-        print("[WAIT] waiting for scan to finish…")
+        print(f"[REAL] [SUBMIT] Queueing scan '{label}'...")
+        # Filter params for send_fly2d_to_queue...
+        try:
+            valid_keys = inspect.signature(send_fly2d_to_queue).parameters.keys()
+            clean_params = {k: v for k, v in params.items() if k in valid_keys}
+        except NameError:
+            clean_params = params
+        
+        send_fly2d_to_queue(**clean_params)
+        time.sleep(1)
+        
+    elif is_offline:
+        print(f"[OFFLINE] Skipping submission. Targeting existing/past scan.")
+        
+    else: # Sim
+        print(f"[SIM] Would call: send_fly2d_to_queue(...)")
+        time.sleep(1)
+
+    # --- 2. Wait for Completion (Real Only) ---
+    if is_real:
+        print("[WAIT] Waiting for scan to finish...")
         while True:
             st = RM.status()
             if st['items_in_queue'] == 0 and st['manager_state'] == 'idle':
                 break
             time.sleep(1.0)
-        print("[WAIT] scan complete.")
+        print("[WAIT] Scan complete.")
     else:
-        print("[SIM/OFFLINE] Skipping RM.status() wait loop. Assuming scan finished.")
+        # Offline/Sim: No waiting needed
+        pass
 
-    # 3) get scan_id and prepare output folder
+    # --- 3. Get ID and Folder ---
     data_wd = params.get('data_wd', '.')
     
     if is_real:
@@ -1472,31 +1465,31 @@ def submit_and_export(**params):
         last_id = hdr.start['scan_id']
     elif is_offline:
         last_id = params.get('target_id')
-        print(f"[OFFLINE] Using fixed target ID: {last_id}")
-
+        if last_id is None:
+            raise ValueError("Mode is Offline (2) but no 'target_id' provided!")
+        print(f"[OFFLINE] Using Target ID: {last_id}")
     else:
-        # Fixed dummy ID for simulation so you know where to paste files
         last_id = 111111 
-        print(f"[SIM] Using fixed dummy ID: {last_id}")
+        print(f"[SIM] Using dummy ID: {last_id}")
 
     out_dir = os.path.join(data_wd, f"automap_{last_id}")
     os.makedirs(out_dir, exist_ok=True)
-    print(f"[EXPORT] saving all outputs to {out_dir}")
-    print(f"ID being used {last_id}")
+    print(f"[EXPORT] Output directory: {out_dir}")
 
+    # --- 4. Export Data ---
     all_elem_list = params.get('elem_list', [])
 
-    # 4 & 5) Export Data (Real) vs Wait for Data (Sim)
     if is_real or is_offline:
-        # --- REAL MODE: Generate files automatically ---
+        # Both Real and Offline modes trigger the export logic
+        print(f"[{'REAL' if is_real else 'OFFLINE'}] Exporting data (remote_seg={is_remote})...")
         for elem_list in all_elem_list:
             export_xrf_roi_data(
                 last_id,
                 norm=params.get('export_norm', 'sclr1_ch4'),
                 elem_list=elem_list,
                 wd=out_dir,
-                real_test=1,
-                remote_seg=is_remote
+                real_test=1,         # Force '1' here so the export function knows to actually run
+                remote_seg=is_remote # Pass the remote flag
             )
         export_scan_params(
             sid=last_id,
@@ -1505,214 +1498,189 @@ def submit_and_export(**params):
             real_test=1
         )
     else:
-        # --- SIM MODE: Wait for manual paste ---
+        # Sim Mode: Manual Copy
         params_file_name = f"scan_{last_id}_params.json"
-        
-        
         print("\n" + "!"*60)
-        print(f"[SIMULATION PAUSE] Waiting for data...")
-        print(f"Please copy TIFF files and '{params_file_name}' into:")
-        print(f"  -> {os.path.abspath(out_dir)}")
+        print(f"[SIMULATION] Waiting for files in: {out_dir}")
+        print(f"Copy TIFFs and '{params_file_name}' here.")
         print("!"*60)
 
         while True:
-            # Check if params exists
-            
-            # Check if at least one TIFF exists
             tiffs_in_dir = list(Path(out_dir).glob("*.tiff")) + list(Path(out_dir).glob("*.tif"))
-            
-            if  tiffs_in_dir:
+            if tiffs_in_dir:
                 print(f"[SIM] Found {len(tiffs_in_dir)} TIFFs. Resuming...")
                 break
-            
-            print(f"[SIM] Waiting... (TIFFs: {len(tiffs_in_dir)})")
             time.sleep(3)
 
-    # --- COMMON LOGIC RESUMES ---
+    return last_id, out_dir
 
-    # Read the step_size from the params file
-    params_json_path = os.path.join(out_dir, f"scan_{last_id}_params.json")
-    step_size = 1.0 # Default safe value
+def analyze_data(scan_id, out_dir, **params):
+    """
+    Step 2: Analysis. 
+    Iterates through element groups, calculates unions, and saves individual 
+    blob JSONs into 'out_dir' for the headless scanner to find.
+    """
+    print(f"\n[ANALYSIS] Starting analysis for Scan {scan_id} in {out_dir}")
+    
+    # --- 1. Read Scan Parameters ---
+    params_json_path = os.path.join(out_dir, f"scan_{scan_id}_params.json")
+    step_size = 1.0
     x_start = 0.0
     y_start = 0.0
 
     if os.path.exists(params_json_path):
-        print(f"Reading params from: {params_json_path}")
         with open(params_json_path, 'r') as f:
             params_data = json.load(f)
             step_size = params_data.get('step_size', 1.0)
-            print(f"Step size from params file: {step_size}")
-            
             scan_input = params_data.get('start_doc', {}).get('scan', {}).get('scan_input', [])
             if len(scan_input) >= 4:
                 x_start = scan_input[0]
                 y_start = scan_input[3]
-                print(f"x_start: {x_start}, y_start: {y_start}")
 
+    # --- 2. Prepare Elements ---
     elem_list_of_lists = params.get("elem_list", [])
     if not elem_list_of_lists:
-        print("elem_list is empty, nothing to process.")
+        print("elem_list is empty.")
         return
 
     if isinstance(elem_list_of_lists[0], str):
         elem_list_of_lists = [elem_list_of_lists]
 
+    # Flatten to get unique elements for loading
     all_elements = sorted(list(set(elem for sublist in elem_list_of_lists for elem in sublist)))
     
-    # This function must be available in scope
+    # Load Tiff Paths
     tiff_paths = wait_for_element_tiffs(all_elements, out_dir)
 
-    COLOR_ORDER = [
-        'red', 'green', 'blue', 'orange', 'purple', 'cyan', 'olive', 'yellow', 'brown', 'pink'
-    ]
+    COLOR_ORDER = ['red', 'green', 'blue', 'orange', 'purple', 'cyan', 'olive', 'yellow', 'brown', 'pink']
     precomputed_blobs = {color: {} for color in COLOR_ORDER}
-
+    element_to_color = {element: COLOR_ORDER[i] for i, element in enumerate(all_elements) if i < len(COLOR_ORDER)}
+    
     min_thresh = params.get("min_threshold_intensity", "")
     min_area = params.get("min_threshold_area", "")
-    microns_per_pixel_x = step_size
-    microns_per_pixel_y = step_size
-    true_origin_x = x_start
-    true_origin_y = y_start
 
-    element_to_color = {element: COLOR_ORDER[i] for i, element in enumerate(all_elements) if i < len(COLOR_ORDER)}
-
+    # --- 3. Blob Detection Loop ---
     for element in all_elements:
-        if element not in tiff_paths:
-            print(f"Skipping element {element} as its TIFF file is missing.")
-            continue
+        if element not in tiff_paths: continue
         
         color = element_to_color.get(element)
-        if not color:
-            print(f"Skipping element {element} as it has no assigned color.")
-            continue
+        if not color: continue
 
         tiff_path = tiff_paths[element]
-        print(f"Processing {tiff_path.name} for element {element} as color {color}")
+        print(f"Processing {tiff_path.name} ({color})")
         try:
             tiff_img = tiff.imread(str(tiff_path)).astype(np.float32)
-            # Ensure these helper functions are imported/available
             tiff_norm, tiff_dilated = normalize_and_dilate(tiff_img)
-            b = detect_blobs(
-                tiff_dilated,
-                tiff_norm,
-                min_thresh,
-                min_area,
-                color,
-                tiff_path.name
-            )
+            b = detect_blobs(tiff_dilated, tiff_norm, min_thresh, min_area, color, tiff_path.name)
             precomputed_blobs[color][(min_thresh, min_area)] = b
         except Exception as e:
             print(f"❌ Error processing {tiff_path.name}: {e}")
             traceback.print_exc()
 
+    # --- 4. Union & Export Loop ---
     for elem_list in elem_list_of_lists:
         group_name = "".join(elem_list)
-        print(f"\n--- Processing element group: {group_name} ({elem_list}) ---")
+        print(f"\n--- Processing Group: {group_name} ---")
 
         group_blobs_for_union = {}
         for i, element in enumerate(elem_list):
-            if i >= 3: 
-                print(f"Warning: element group > 3. Only first 3 used: {elem_list}")
-                break
-            
+            if i >= 3: break
             original_color = element_to_color.get(element)
-            if not original_color or not precomputed_blobs.get(original_color):
-                print(f"Warning: No blobs for {element} in group {group_name}.")
-                continue
-
+            if not original_color: continue
+            
             new_color = ['red', 'green', 'blue'][i]
-            group_blobs_for_union[new_color] = precomputed_blobs[original_color]
+            if original_color in precomputed_blobs:
+                group_blobs_for_union[new_color] = precomputed_blobs[original_color]
 
+        # Must have at least 2 elements to form a union
         if len(group_blobs_for_union) >= 2:
-            unions = find_union_blobs(
-                group_blobs_for_union,
-                microns_per_pixel_x,
-                microns_per_pixel_y,
-                true_origin_x,
-                true_origin_y
-            )
-
+            unions = find_union_blobs(group_blobs_for_union, step_size, step_size, x_start, y_start)
             unions = merge_overlapping_boxes_dict(unions, overlap_thresh=0.5)
 
             formatted_unions = {}
-            print("Processing images now")
             for idx, union in unions.items():
                 box_name = f"Union Box {group_name} #{idx.split('#')[-1].strip()}"
-                formatted = {
+                formatted_unions[box_name] = {
                     "text": box_name,
+                    "cx": union["real_center_um"][0], # Ensuring keys match headless expectations
+                    "cy": union["real_center_um"][1],
+                    "num_x": union["real_size_um"][0],
+                    "num_y": union["real_size_um"][1],
+                    # Preserve original verbose keys if needed for other logs
                     "image_center": union["center"],
                     "image_length": union["length"],
-                    "image_area_px²": union["area"],
                     "real_center_um": union["real_center_um"],
                     "real_size_um": union["real_size_um"],
-                    "real_area_um²": union["real_area_um\u00b2"],
-                    "real_top_left_um": union["real_top_left_um"],
-                    "real_bottom_right_um": union["real_bottom_right_um"]
                 }
-                formatted_unions[box_name] = formatted
 
-            output_path = Path(out_dir) / f"unions_output_{group_name}.json"
-            with open(output_path, "w") as f:
+            # Save the "Master" Union JSON (Headless ignores this via startswith("unions_output"))
+            out_json = Path(out_dir) / f"unions_output_{group_name}.json"
+            with open(out_json, "w") as f:
                 json.dump(formatted_unions, f, indent=2)
-            print(f"\n✅ Union data for {group_name} saved to: {output_path}")
-
+            
+            # Save the INDIVIDUAL JSONs (Headless finds these)
+            # This function must create files that do NOT start with "unions_output"
             save_each_blob_as_individual_scan(formatted_unions, out_dir)
 
-            print("Perform fine scan now")
-            if is_real:
-                headless_send_queue_fine_scan(out_dir, params, last_id, 1)
-            else:
-                print(f"[SIM] Would call: headless_send_queue_fine_scan(..., real_test=0)")
+    # --- 5. Visualization ---
+    if tiff_paths:
+        group_blobs_vis = {}
+        for i, element in enumerate(elem_list):
+            if i >= len(COLOR_ORDER): break
+            orig = element_to_color.get(element)
+            if orig: group_blobs_vis[COLOR_ORDER[i]] = precomputed_blobs[orig]
 
-        if tiff_paths:
-            group_blobs_for_all_elements = {}
-            for i, element in enumerate(elem_list):
-                if i >= len(COLOR_ORDER): break
-                original_color = element_to_color.get(element)
-                if original_color and original_color in precomputed_blobs:
-                    new_color = COLOR_ORDER[i]
-                    group_blobs_for_all_elements[new_color] = precomputed_blobs[original_color]
+        create_rgb_tiff(tiff_paths, out_dir, elem_list, group_name)
+        create_all_elements_tiff(tiff_paths, out_dir, elem_list, group_blobs_vis, group_name)
 
-            create_rgb_tiff(tiff_paths, out_dir, elem_list, group_name)
-            create_all_elements_tiff(tiff_paths, out_dir, elem_list, group_blobs_for_all_elements, group_name)
+    print("[ANALYSIS] Done.")
+
+
+def submit_fine_scans_to_queue(scan_id, out_dir, **params):
+    """
+    Step 3: Queue Submission.
+    Only actually queues if real_test == 1. 
+    Offline (2) and Sim (0) will just print.
+    """
+    mode = params.get('real_test', 0)
+    is_real = (mode == 1)
     
+    print(f"\n[QUEUE] Processing fine scans in: {out_dir}")
+    
+    if is_real:
+        headless_send_queue_fine_scan(out_dir, params, scan_id, 1)
+    else:
+        # Covers both Sim (0) and Offline (2)
+        print(f"[{'OFFLINE' if mode==2 else 'SIM'}] Skipping actual queue submission.")
+        print(f"Would call: headless_send_queue_fine_scan('{out_dir}', ...)")
 
-    print("done") 
-    print("[DONE] all exports complete.")
-    time.sleep(2)
-
-    # Queue management logic
+def run_fine_scans(is_real): 
+    """
+    Step 4: Start the Queue.
+    """
     if is_real:
         st = RM.status()
         if st['items_in_queue'] != 0 and st['manager_state'] == 'idle':
             RM.queue_start()
-            print('[QSERVER] queue started')
+            print('[QSERVER] Queue started')
         else: 
-            print('[QSERVER] queue waiting')
+            print('[QSERVER] Queue waiting or already running')
         
         wait_for_queue_done()
     else:
-        print("[SIM] Would check RM.status() and start queue if idle.")
-        print("[SIM] Would call wait_for_queue_done().")
+        print("[SIM] Would check RM.status() and start queue.")
 
+def load_and_queue(json_path, real_test, target_id=None, remote_seg=False):
+    
+    # 0) Clear caches
+    if 'remote_handler' in globals():
+        remote_handler.clear_cache() 
 
-def load_and_queue(json_path, real_test,target_id=None, remote_seg=False):
-    """
-    Load scan parameters from JSON, compute necessary fields,
-    and either enqueue only or enqueue+export based on a flag.
-
-    JSON can include an optional 'block_and_export': true to wait and post-process.
-    """
-    remote_handler.clear_cache() # clear the elements in the cache appended in previous call
-
-    # 1) Read main params
+    # 1) Load JSON
     with open(json_path, 'r') as f:
         params = json.load(f)
 
-    # 2) Extract blocking flag
-    # block_and_export = params.pop('block_and_export', True)
-
-    # 3) Load ROI from separate file if requested
+    # 2) ROI & Calc Logic
     roi_file = params.pop('roi_positions_file', None)
     if roi_file:
         if not os.path.isfile(roi_file):
@@ -1723,22 +1691,38 @@ def load_and_queue(json_path, real_test,target_id=None, remote_seg=False):
         with open(params['roi_positions'], 'r') as rf:
             params['roi_positions'] = json.load(rf)
 
-    # 4) Compute mot1_n & mot2_n from a single step_size
     if 'step_size' in params:
         step = params.pop('step_size')
         params['mot1_n'] = int(abs(params['mot1_e'] - params['mot1_s']) / step)
         params['mot2_n'] = int(abs(params['mot2_e'] - params['mot2_s']) / step)
 
-    # 5) Ensure dets is a string literal for eval()
-    # if isinstance(params.get('dets'), list):
-    #     params['dets'] = repr(params['dets'])
-
-    # 6) Dispatch
+    # 3) Set Flags
     params['real_test'] = real_test
     params['remote_seg'] = remote_seg
+    
+    # IMPORTANT: If Offline (real_test=2), target_id is mandatory.
     if target_id is not None:
         params['target_id'] = target_id
-    submit_and_export(**params)
+    elif real_test == 2 and 'target_id' not in params:
+        print("[WARNING] Running in Offline mode (2) but no target_id provided.")
+        # You might want to raise an error or rely on it being in the JSON
+    
+    # 4) EXECUTE
+    print(f"--- Workflow: {os.path.basename(json_path)} (Mode: {real_test}) ---")
+
+    # A. Submit / Export
+    scan_id, out_dir = submit_and_export(**params)
+    
+    # B. Analyze
+    analyze_data(scan_id, out_dir, **params)
+    
+    # C. Queue (Will skip if mode != 1)
+    submit_fine_scans_to_queue(scan_id, out_dir, **params)
+    
+    # D. Run (Will skip if mode != 1)
+    run_fine_scans(real_test == 1)
+    
+    print("--- Done ---")
 
 
 
