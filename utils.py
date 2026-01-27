@@ -45,8 +45,33 @@ class RemoteSegmentation:
     def get_cache(self):
         return self.segapp_elems
     
-    def write(self, data):
-        self.writer.write_array(data)
+    def write(self, data, key=None):
+        """Write numpy array data to remote handler."""
+        try:
+            result = self.writer.write_array(data, key=key)
+            print(f"[REMOTE] Data written with key: {key}, result: {result}" if key else f"[REMOTE] Data written, result: {result}")
+            return result
+        except Exception as e:
+            print(f"[REMOTE ERROR] Failed to write data with key {key}: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def write_metadata(self, metadata_dict, key=None):
+        """Write metadata as a JSON-serializable structure."""
+        import json
+        try:
+            # Convert dict to JSON string, then to numpy array of bytes for storage
+            json_str = json.dumps(metadata_dict, default=str)  # default=str handles non-serializable objects
+            json_bytes = np.array(list(json_str.encode('utf-8')), dtype=np.uint8)
+            result = self.writer.write_array(json_bytes, key=key)
+            print(f"[REMOTE] Metadata written with key: {key}, result: {result}" if key else f"[REMOTE] Metadata written, result: {result}")
+            return result
+        except Exception as e:
+            print(f"[REMOTE ERROR] Failed to write metadata with key {key}: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
 # Create a global instance of this class
 remote_handler = RemoteSegmentation() 
@@ -1091,13 +1116,14 @@ def export_xrf_roi_data(scan_id, norm = 'sclr1_ch4', elem_list = [], wd = '.', r
                 if norm !=None:
                     spectrum = spectrum/scalar
                 xrf_img = spectrum.reshape(scan_dim)
-                print ("[REMOTE] Writing XRF image for element:", elem)
+                print("[REMOTE] Writing XRF image for element:", elem)
+                # Write array with unique key
                 remote_handler.write(xrf_img)
                 
                 # Send scan parameters (metadata) right after each array
                 scan_params = export_scan_params(sid=scan_id, zp_flag=True, save_to=None, real_test=1)
                 scan_params['element'] = elem  # Add element info to metadata
-                #remote_handler.write(scan_params) 
+                remote_handler.write_metadata(scan_params) 
     else:
 
         for elem in sorted(elem_list):
@@ -1490,19 +1516,24 @@ def submit_and_export(**params):
 
     # --- 4. Export Data ---
     all_elem_list = params.get('elem_list', [])
+    
+    # Flatten nested list and remove duplicates
+    if all_elem_list and isinstance(all_elem_list[0], list):
+        all_elem_list = list(set(elem for sublist in all_elem_list for elem in sublist))
+    else:
+        all_elem_list = list(set(all_elem_list)) if all_elem_list else []
 
     if is_real or is_offline:
         # Both Real and Offline modes trigger the export logic
         print(f"[{'REAL' if is_real else 'OFFLINE'}] Exporting data (remote_seg={is_remote})...")
-        for elem_list in all_elem_list:
-            export_xrf_roi_data(
-                last_id,
-                norm=params.get('export_norm', 'sclr1_ch4'),
-                elem_list=elem_list,
-                wd=out_dir,
-                real_test=1,         # Force '1' here so the export function knows to actually run
-                remote_seg=is_remote # Pass the remote flag
-            )
+        export_xrf_roi_data(
+            last_id,
+            norm=params.get('export_norm', 'sclr1_ch4'),
+            elem_list=all_elem_list,
+            wd=out_dir,
+            real_test=1,         # Force '1' here so the export function knows to actually run
+            remote_seg=is_remote # Pass the remote flag
+        )
         export_scan_params(
             sid=last_id,
             zp_flag=bool(params.get('zp_move_flag', True)),
