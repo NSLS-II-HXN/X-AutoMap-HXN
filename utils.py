@@ -12,13 +12,18 @@ from pathlib import Path
 import traceback as trackback
 import inspect
 from skimage.measure import shannon_entropy
+import warnings
 
 import cv2
 import numpy as np
 import tifffile as tiff
 import time
+import pandas as pd
 
 from hxntools.CompositeBroker import db
+
+# Suppress DataFrame fragmentation warnings from databroker
+warnings.filterwarnings('ignore', category=pd.errors.PerformanceWarning, message='.*DataFrame is highly fragmented.*')
 
 ## CREATING TILED CLIENT FOR NOW HERE GLOBALLY
 
@@ -1086,6 +1091,7 @@ def export_xrf_roi_data(scan_id, norm = 'sclr1_ch4', elem_list = [], wd = '.', r
                 if norm !=None:
                     spectrum = spectrum/scalar
                 xrf_img = spectrum.reshape(scan_dim)
+                print ("[REMOTE] Writing XRF image for element:", elem)
                 remote_handler.write(xrf_img)
                 
                 # Send scan parameters (metadata) right after each array
