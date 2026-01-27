@@ -1087,6 +1087,11 @@ def export_xrf_roi_data(scan_id, norm = 'sclr1_ch4', elem_list = [], wd = '.', r
                     spectrum = spectrum/scalar
                 xrf_img = spectrum.reshape(scan_dim)
                 remote_handler.write(xrf_img)
+                
+                # Send scan parameters (metadata) right after each array
+                scan_params = export_scan_params(sid=scan_id, zp_flag=True, save_to=None, real_test=1)
+                scan_params['element'] = elem  # Add element info to metadata
+                #remote_handler.write(scan_params) 
     else:
 
         for elem in sorted(elem_list):
@@ -1523,6 +1528,12 @@ def analyze_data(scan_id, out_dir, **params):
     """
     print(f"\n[ANALYSIS] Starting analysis for Scan {scan_id} in {out_dir}")
     
+    # Skip analysis if remote_seg is True (data sent to remote port, no TIFFs)
+    remote_seg = params.get('remote_seg', False)
+    if remote_seg:
+        print("[ANALYSIS] remote_seg=True, skipping local analysis (handled remotely)...")
+        return
+    
     # --- 1. Read Scan Parameters ---
     params_json_path = os.path.join(out_dir, f"scan_{scan_id}_params.json")
     step_size = 1.0
@@ -1714,11 +1725,15 @@ def load_and_queue(json_path, real_test, target_id=None, remote_seg=False):
     # A. Submit / Export
     scan_id, out_dir = submit_and_export(**params)
     
+    # Update params with scan_id and out_dir
+    params['scan_id'] = scan_id
+    params['out_dir'] = out_dir
+    
     # B. Analyze
-    analyze_data(scan_id, out_dir, **params)
+    analyze_data(**params)
     
     # C. Queue (Will skip if mode != 1)
-    submit_fine_scans_to_queue(scan_id, out_dir, **params)
+    submit_fine_scans_to_queue(**params)
     
     # D. Run (Will skip if mode != 1)
     run_fine_scans(real_test == 1)
