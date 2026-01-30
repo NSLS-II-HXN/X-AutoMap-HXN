@@ -1823,7 +1823,7 @@ def load_and_queue(json_path, real_test, target_id=None, remote_seg=False):
     
     # B. Analyze
     if remote_seg:
-        print("\n[ANALYSIS] Remote analysis selected, sending data remotely...")
+        print("\n[ANALYSIS] Remote analysis selected, receiving data remotely...")
         #placeholder for Seher
         results_dict = {} #remote.recieve results
         np_array = np.array([]) #remote.recieve results
