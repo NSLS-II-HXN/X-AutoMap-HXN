@@ -1602,7 +1602,17 @@ def submit_and_export(**params):
 
     return last_id, out_dir
 
-def analyze_data(scan_id, out_dir, **params):
+def analyze_data_remote(results_dict, np_array, scan_metadata):
+    """
+    Placeholder for remote analysis function.
+    In a real implementation, this would send data to a remote server
+    for analysis and return the results.
+    """
+    print("[REMOTE ANALYSIS] This is a placeholder function.")
+    # Implement remote analysis logic here
+    return results_dict, np_array, scan_metadata
+
+def analyze_data_local(scan_id, out_dir, **params):
     """
     Step 2: Analysis. 
     Iterates through element groups, calculates unions, and saves individual 
@@ -1805,14 +1815,22 @@ def load_and_queue(json_path, real_test, target_id=None, remote_seg=False):
     print(f"--- Workflow: {os.path.basename(json_path)} (Mode: {real_test}) ---")
 
     # A. Submit / Export
-    scan_id, out_dir = submit_and_export(**params)
+    scan_id, out_dir = submit_and_export(**params) #this handles the remote submission
     
     # Update params with scan_id and out_dir
     params['scan_id'] = scan_id
     params['out_dir'] = out_dir
     
     # B. Analyze
-    analyze_data(**params)
+    if remote_seg:
+        print("\n[ANALYSIS] Remote analysis selected, sending data remotely...")
+        #placeholder for Seher
+        results_dict = {} #remote.recieve results
+        np_array = np.array([]) #remote.recieve results
+        scan_metadata = {} #remote.recieve results
+        analyze_data_remote(results_dict, np_array, scan_metadata)
+    else:
+        analyze_data_local(**params)
     
     # C. Queue (Will skip if mode != 1)
     submit_fine_scans_to_queue(**params)
