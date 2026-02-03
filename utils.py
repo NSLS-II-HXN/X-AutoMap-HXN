@@ -89,25 +89,26 @@ class RemoteSegmentationReceiver:
         self.count_connect = 0
 
     def subscribe(self):
-        sub = self.reader.subscribe()
-        sub.child_created.add_callback(self.get_keys)
+        self.sub = self.reader.subscribe()
+        self.sub.child_created.add_callback(self.get_keys)
         print("Listening for updates. Use Ctrl+C to stop....")
-        sub.start()
+        self.sub.start()
 
     def get_keys(self, data):
         print(f"Received Key : {data}")
-        self.keys.append(data)
+        #self.keys.append(data)
         sub = data.child().subscribe()
         sub.new_data.add_callback(self.get_data)
         sub.start_in_thread(start=1)
-    
-    def get_data(self, sub, data):
+        #sub1.disconnect()
+
+    def get_data(self, data):
         print(f"count num : {self.count_connect}")
-        print(f"Received Data : {data}")
-        self.values.append(data)
+        #print(f"Received Data : {data}")
+        #self.values.append(data)
         self.count_connect += 1 
         if self.count_connect == self.num_elements:
-            sub.disconnect()
+            self.sub.disconnect()
 
 
 # Create a global instance of this class
