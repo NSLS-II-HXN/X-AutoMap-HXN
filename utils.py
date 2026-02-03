@@ -95,18 +95,16 @@ class RemoteSegmentationReceiver:
         sub.start()
 
     def get_keys(self, data):
-        print(f"Received Key : {data.key}")
+        print(f"Received Key : {data}")
         self.keys.append(data)
         sub = data.child().subscribe()
         sub.new_data.add_callback(self.get_data)
         sub.start_in_thread(start=1)
     
-    def get_data(self, data):
-        print(f"Received Data : {data.key}")
+    def get_data(self, sub, data):
+        print(f"count num : {self.count_connect}")
+        print(f"Received Data : {data}")
         self.values.append(data)
-        sub = data.child().subscribe()
-        sub.new_data.add_callback(self.try_disconnect)
-        sub.start_in_thread(start=1)
         self.count_connect += 1 
         if self.count_connect == self.num_elements:
             sub.disconnect()
@@ -1866,6 +1864,8 @@ def load_and_queue(json_path, real_test, target_id=None, remote_seg=False):
         #placeholder for Seher
         remote_receiver = RemoteSegmentationReceiver(remote_sender.cache_size())
         remote_receiver.subscribe()
+
+        print("\n[ANALYSIS] Remote segmentation results received ...")
         results_dict = {} #remote.recieve results
         np_array = np.array([]) #remote.recieve results
         scan_metadata = {} #remote.recieve results
