@@ -6,11 +6,11 @@ import tifffile as tiff
 import numpy as np
 import time
 import cv2
-from .blobs.detection import detect_blobs
-from .blobs.processing import find_union_blobs
-from .plotting import plot_analysis_results
-from .utils import is_featureless, make_json_serializable, wait_for_element_tiffs, formatted_unions_to_table, normalize_and_dilate, merge_overlapping_boxes_dict
-from .export import create_rgb_tiff, create_all_elements_tiff, save_each_blob_as_individual_scan
+from automap_hxn.blobs.detection import detect_blobs
+from automap_hxn.blobs.processing import find_union_blobs
+from automap_hxn.plotting import plot_analysis_results
+from automap_hxn.utils import is_featureless, make_json_serializable, wait_for_element_tiffs, formatted_unions_to_table, normalize_and_dilate, merge_overlapping_boxes_dict
+from automap_hxn.export import create_rgb_tiff, create_all_elements_tiff, save_each_blob_as_individual_scan
 
 
 def analyze_data_local(scan_id=None, 

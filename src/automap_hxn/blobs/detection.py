@@ -2,7 +2,7 @@ import numpy as np
 import cv2
 from skimage.segmentation import watershed
 from skimage.feature import peak_local_max
-from ..utils import normalize_and_dilate
+from automap_hxn.utils import normalize_and_dilate
 
 # Cellpose imports (optional - will gracefully handle if not installed)
 try:

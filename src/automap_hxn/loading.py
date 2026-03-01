@@ -1,8 +1,8 @@
 import json
 import os
-from .queue import submit_and_export, submit_fine_scans_to_queue, run_fine_scans
-from .analysis import analyze_data_local, analyze_data_remote
-from .export import export_xrf_tiled
+from automap_hxn.scan_queue import submit_and_export, submit_fine_scans_to_queue, run_fine_scans
+from automap_hxn.analysis import analyze_data_local, analyze_data_remote
+from automap_hxn.export import export_xrf_tiled
 from automap_hxn.remote_segmentation import RemoteSegmentationReceiver
 
 import warnings
@@ -12,7 +12,7 @@ from tiled.client import from_uri
 c = from_uri('https://tiled.nsls2.bnl.gov')
 c_reconstructions = c["tst/sandbox/eugene/synaps/reconstructions"]
 
-from .remote_segmentation import RemoteSegmentationSender
+from automap_hxn.remote_segmentation import RemoteSegmentationSender
 
 # Create a global instance of the remote sender
 remote_sender = RemoteSegmentationSender() 

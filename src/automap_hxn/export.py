@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tifffile as tiff
 
-from .utils import resize_if_needed, merge_overlapping_boxes_dict, make_json_serializable
+from automap_hxn.utils import resize_if_needed, merge_overlapping_boxes_dict, make_json_serializable
 
 def process_and_save_json(input_path, overlap_thresh=0.5):
     """Load JSON file, merge overlapping boxes, save as *_merged.json."""
@@ -651,6 +651,7 @@ def xrf_to_svg(array, metadata=None):
     ax.set_ylabel('Y (pixels)')
     ax.set_title(f'XRF Intensity: {element}' + (f' (Scan {scan_id})' if scan_id else ''))
     ax.set_aspect('equal')
+    ax.invert_yaxis()
 
     # Save to SVG
     buffer = io.BytesIO()
