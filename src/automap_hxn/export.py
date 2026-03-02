@@ -243,8 +243,9 @@ def save_each_blob_as_individual_scan(json_safe_data, output_dir="scans"):
             json.dump(make_json_serializable(scan_data), f, indent=4)
 
 
-def _get_flyscan_dimensions(hdr):
-    start_doc = hdr.start
+def _get_flyscan_dimensions(run):
+    """Get scan dimensions from a tiled BlueskyRun."""
+    start_doc = run.metadata["start"]
     # 2D_FLY_PANDA: prefer 'dimensions', fallback to 'shape'
     if 'scan' in start_doc and start_doc['scan'].get('type') == '2D_FLY_PANDA':
         if 'dimensions' in start_doc:
@@ -263,6 +264,55 @@ def _get_flyscan_dimensions(hdr):
             raise ValueError("No shape or num_points found for rel_scan")
     else:
         raise ValueError("Unknown scan type for _get_flyscan_dimensions")
+
+
+def _get_scan_params_from_tiled(run, zp_flag=True):
+    """Extract scan parameters from a tiled BlueskyRun object."""
+    start_doc = dict(run.metadata["start"])
+
+    # Get baseline data
+    baseline_ds = run["baseline"]["data"]
+
+    if zp_flag:
+        roi = {
+            "zpssx":    float(baseline_ds["zpssx"][0].read().item()),
+            "zpssy":    float(baseline_ds["zpssy"][0].read().item()),
+            "zpssz":    float(baseline_ds["zpssz"][0].read().item()),
+            "smarx":    float(baseline_ds["smarx"][0].read().item()),
+            "smary":    float(baseline_ds["smary"][0].read().item()),
+            "smarz":    float(baseline_ds["smarz"][0].read().item()),
+            "zp.zpz1":  float(baseline_ds["zpz1"][0].read().item()),
+            "zpsth":    float(baseline_ds["zpsth"][0].read().item()),
+            "zps.zpsx": float(baseline_ds["zpsx"][0].read().item()),
+            "zps.zpsz": float(baseline_ds["zpsz"][0].read().item()),
+        }
+    else:
+        roi = {
+            "dssx":  float(baseline_ds["dssx"][0].read().item()),
+            "dssy":  float(baseline_ds["dssy"][0].read().item()),
+            "dssz":  float(baseline_ds["dssz"][0].read().item()),
+            "dsx":   float(baseline_ds["dsx"][0].read().item()),
+            "dsy":   float(baseline_ds["dsy"][0].read().item()),
+            "dsz":   float(baseline_ds["dsz"][0].read().item()),
+            "sbz":   float(baseline_ds["sbz"][0].read().item()),
+            "dsth":  float(baseline_ds["dsth"][0].read().item()),
+        }
+
+    # Compute step_size from scan_input
+    scan_info = start_doc.get("scan", {})
+    si = scan_info.get("scan_input", [])
+    if scan_info.get("type") == "2D_FLY_PANDA" and len(si) >= 3:
+        fast_start, fast_end, fast_N = si[0], si[1], si[2]
+        step_size = abs(fast_end - fast_start) / fast_N
+    else:
+        raise ValueError(f"Cannot compute step_size for scan type {scan_info.get('type')}")
+
+    return {
+        "scan_id": start_doc.get("scan_id"),
+        "start_doc": start_doc,
+        "roi_positions": roi,
+        "step_size": float(step_size),
+    }
 
 def _pad_scalar_to_expected_length(scalar, expected_length):
     """
@@ -306,17 +356,15 @@ def export_xrf_tiled(tiled_client, path_raw: str, path_out: str, scan_id: int, n
         elem_list: List of elements to export
         append_meta_with: Additional metadata to append to the export (default: empty dict)
     """
-    from hxntools.CompositeBroker import db
-
     elem_list = elem_list or []
 
     if not scan_id:
         print("[EXPORT] Skipping remote XRF export - no scan ID provided.")
         return
 
-    hdr = db[int(scan_id)]
+    run = tiled_client[path_raw][str(scan_id)]
 
-    meta = export_scan_params(sid=scan_id)
+    meta = _get_scan_params_from_tiled(run)
     meta.update(append_meta_with or {})
 
     # Create a container for this scan's data in the provided parent Tiled client
@@ -329,10 +377,10 @@ def export_xrf_tiled(tiled_client, path_raw: str, path_out: str, scan_id: int, n
     channels = [1, 2, 3]
     print(f"[REMOTE] {elem_list = }")
     print(f"[REMOTE] fetching XRF ROIs")
-    scan_dim = _get_flyscan_dimensions(hdr)
+    scan_dim = _get_flyscan_dimensions(run)
     print(f"[REMOTE] fetching scalar values")
 
-    scalar = np.array(list(hdr.data(norm))).squeeze()
+    scalar = run["primary"]["data"][norm].read().squeeze()
     print(f"[REMOTE] fetching scalar {norm} values done")
 
     # Calculate expected length from scan dimensions
@@ -350,7 +398,7 @@ def export_xrf_tiled(tiled_client, path_raw: str, path_out: str, scan_id: int, n
     for elem in sorted(elem_list):
         try:
             roi_keys = [f'Det{chan}_{elem}' for chan in channels]
-            spectrum = np.sum([np.array(list(hdr.data(roi)), dtype=np.float32).squeeze() for roi in roi_keys], axis=0)
+            spectrum = np.sum([run["primary"]["data"][roi].read().astype(np.float32).squeeze() for roi in roi_keys], axis=0)
             
             # Pad scalar if needed to match spectrum length
             if norm is not None:
