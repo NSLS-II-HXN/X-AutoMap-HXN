@@ -275,27 +275,27 @@ def _get_scan_params_from_tiled(run, zp_flag=True):
 
     if zp_flag:
         roi = {
-            "zpssx":    float(baseline_ds["zpssx"][0].read().item()),
-            "zpssy":    float(baseline_ds["zpssy"][0].read().item()),
-            "zpssz":    float(baseline_ds["zpssz"][0].read().item()),
-            "smarx":    float(baseline_ds["smarx"][0].read().item()),
-            "smary":    float(baseline_ds["smary"][0].read().item()),
-            "smarz":    float(baseline_ds["smarz"][0].read().item()),
-            "zp.zpz1":  float(baseline_ds["zpz1"][0].read().item()),
-            "zpsth":    float(baseline_ds["zpsth"][0].read().item()),
-            "zps.zpsx": float(baseline_ds["zpsx"][0].read().item()),
-            "zps.zpsz": float(baseline_ds["zpsz"][0].read().item()),
+            "zpssx":    float(baseline_ds["zpssx"].read()[0]),
+            "zpssy":    float(baseline_ds["zpssy"].read()[0]),
+            "zpssz":    float(baseline_ds["zpssz"].read()[0]),
+            "smarx":    float(baseline_ds["smarx"].read()[0]),
+            "smary":    float(baseline_ds["smary"].read()[0]),
+            "smarz":    float(baseline_ds["smarz"].read()[0]),
+            "zp.zpz1":  float(baseline_ds["zpz1"].read()[0]),
+            "zpsth":    float(baseline_ds["zpsth"].read()[0]),
+            "zps.zpsx": float(baseline_ds["zpsx"].read()[0]),
+            "zps.zpsz": float(baseline_ds["zpsz"].read()[0]),
         }
     else:
         roi = {
-            "dssx":  float(baseline_ds["dssx"][0].read().item()),
-            "dssy":  float(baseline_ds["dssy"][0].read().item()),
-            "dssz":  float(baseline_ds["dssz"][0].read().item()),
-            "dsx":   float(baseline_ds["dsx"][0].read().item()),
-            "dsy":   float(baseline_ds["dsy"][0].read().item()),
-            "dsz":   float(baseline_ds["dsz"][0].read().item()),
-            "sbz":   float(baseline_ds["sbz"][0].read().item()),
-            "dsth":  float(baseline_ds["dsth"][0].read().item()),
+            "dssx":  float(baseline_ds["dssx"].read()[0]),
+            "dssy":  float(baseline_ds["dssy"].read()[0]),
+            "dssz":  float(baseline_ds["dssz"].read()[0]),
+            "dsx":   float(baseline_ds["dsx"].read()[0]),
+            "dsy":   float(baseline_ds["dsy"].read()[0]),
+            "dsz":   float(baseline_ds["dsz"].read()[0]),
+            "sbz":   float(baseline_ds["sbz"].read()[0]),
+            "dsth":  float(baseline_ds["dsth"].read()[0]),
         }
 
     # Compute step_size from scan_input
@@ -362,7 +362,7 @@ def export_xrf_tiled(tiled_client, path_raw: str, path_out: str, scan_id: int, n
         print("[EXPORT] Skipping remote XRF export - no scan ID provided.")
         return
 
-    run = tiled_client[path_raw][str(scan_id)]
+    run = tiled_client[path_raw][int(scan_id)]
 
     meta = _get_scan_params_from_tiled(run)
     meta.update(append_meta_with or {})

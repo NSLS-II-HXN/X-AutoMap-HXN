@@ -450,8 +450,8 @@ def submit_and_export(execution_params, scan_params, export_params, segmentation
         if tiled_client is None or path_raw is None:
             raise ValueError("tiled_client and path_raw are required for data export")
 
-        # Get run from tiled
-        run = tiled_client[path_raw][str(last_id)]
+        # Get run from tiled (use int for scan_id lookup)
+        run = tiled_client[path_raw][int(last_id)]
 
         # Export scan params using tiled
         import json
