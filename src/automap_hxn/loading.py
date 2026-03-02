@@ -163,12 +163,15 @@ def load_and_queue(json_path, target_id=None, remote_seg=False, proceed_fine_sca
     # A. Submit / Export
     print(f"\n[STEP A] Submit and/or Export Coarse Scan")
     # This returns scan_id and out_dir which are needed for subsequent steps
-    # TODO: Check the `submit_and_export` function; 'segmentation_params/remote_seg' is allways treated as False? (look up `is_remote`)
+    segmentation_params = params.get('segmentation_params', {})
+    segmentation_params['remote_seg'] = remote_seg
     scan_id, out_dir = submit_and_export(
         params['execution_params'],
         params['scan_params'],
         params['export_params'],
-        params.get('segmentation_params')
+        segmentation_params,
+        tiled_client=tiled_client,
+        path_raw=params['tiled_raw']
     )
     print(f"[{mode.upper()}] Scan ID: {scan_id}, Output Directory: {out_dir}")
     

@@ -1,4 +1,4 @@
-from .export import export_xrf_roi_data, export_scan_params
+from .export import _get_scan_params_from_tiled
 import os
 import time
 from pathlib import Path
@@ -324,16 +324,18 @@ def wait_for_queue_done(poll_interval=5.0, idle_timeout=3600, auto_restart=True)
         print(".", end="", flush=True)
         time.sleep(poll_interval)
 
-def submit_and_export(execution_params, scan_params, export_params, segmentation_params=None):
+def submit_and_export(execution_params, scan_params, export_params, segmentation_params=None, tiled_client=None, path_raw=None):
     """
     Step 1: Enqueue scan (if real), wait (if real), export data (real/offline).
-    
+
     Args:
         execution_params (dict): Execution mode and flags
         scan_params (dict): Scan parameters (motors, dets, positions, etc)
         export_params (dict): Export settings (elem_list, data_wd, etc)
         segmentation_params (dict): Segmentation settings (optional)
-    
+        tiled_client: Tiled client for reading data (optional, uses MongoDB if not provided)
+        path_raw (str): Path to raw data in tiled (required if tiled_client is provided)
+
     Returns:
         tuple: (last_id, out_dir)
     """
@@ -444,19 +446,21 @@ def submit_and_export(execution_params, scan_params, export_params, segmentation
     if is_real or is_offline:
         # Both Real and Offline modes trigger the export logic
         print(f"[{'REAL' if is_real else 'OFFLINE'}] Exporting data (remote_seg={is_remote})...")
-        export_xrf_roi_data(
-            last_id,
-            norm=export_params.get('export_norm', 'sclr1_ch4'),
-            elem_list=all_elem_list,
-            wd=out_dir,
-            remote_seg=is_remote, # Pass the remote flag,
-            append_meta_with=segmentation_params
-        )
-        export_scan_params(
-            sid=last_id,
-            zp_flag=bool(scan_params.get('zp_move_flag', True)),
-            save_to=out_dir
-        )
+
+        if tiled_client is None or path_raw is None:
+            raise ValueError("tiled_client and path_raw are required for data export")
+
+        # Get run from tiled
+        run = tiled_client[path_raw][str(last_id)]
+
+        # Export scan params using tiled
+        import json
+        from .utils import make_json_serializable
+        meta = _get_scan_params_from_tiled(run, zp_flag=bool(scan_params.get('zp_move_flag', True)))
+        params_file = os.path.join(out_dir, f"scan_{last_id}_params.json")
+        with open(params_file, "w") as f:
+            json.dump(make_json_serializable(meta), f, indent=2)
+        print(f"[EXPORT] Saved scan params to {params_file}")
     else:
         # Sim Mode: Manual Copy
         params_file_name = f"scan_{last_id}_params.json"
