@@ -939,7 +939,7 @@ def _detect_blobs_cellpose(img_norm, img_orig, min_thresh, min_area, **kwargs):
         return []
     
     # Cellpose parameters
-    diameter_guess = kwargs.get('diameter', 60)
+    diameter_guess = kwargs.get('diameter', 30)
     model_type = kwargs.get('model_type', 'cyto3')
     gpu = kwargs.get('gpu', False)
     flow_threshold = kwargs.get('flow_threshold', 0.4)
@@ -970,9 +970,7 @@ def _detect_blobs_cellpose(img_norm, img_orig, min_thresh, min_area, **kwargs):
             channels=channels,
             diameter=diameter_guess,
             flow_threshold=flow_threshold,
-            cellprob_threshold=cellprob_threshold,
-            min_size=cellpose_min_size
-        )
+            cellprob_threshold=cellprob_threshold,)
         
         # Handle different return formats
         if len(res) == 4:
@@ -988,9 +986,11 @@ def _detect_blobs_cellpose(img_norm, img_orig, min_thresh, min_area, **kwargs):
     boxes, areas = _masks_to_boxes_and_areas(masks)
     
     # Filter by diameter range if specified
+    #min_diameter = kwargs.get('min_diameter', 0)
+    #max_diameter = kwargs.get('max_diameter', float('inf'))
+        
     min_diameter = kwargs.get('min_diameter', 0)
     max_diameter = kwargs.get('max_diameter', float('inf'))
-    
     detections = []
     for box, area in zip(boxes, areas):
         # Check area threshold
@@ -1019,6 +1019,124 @@ def _detect_blobs_cellpose(img_norm, img_orig, min_thresh, min_area, **kwargs):
         })
     
     return detections
+
+
+def detect_blobs_cellpose_standalone(img_array, 
+                                      diameter=60, 
+                                      model_type='cyto3', 
+                                      gpu=False,
+                                      min_diameter=30, 
+                                      max_diameter=100,
+                                      flow_threshold=0.4,
+                                      cellprob_threshold=0.0,
+                                      channels=[0, 0],
+                                      min_size=None):
+    """
+    Standalone Cellpose detection function with same nature as reference script.
+    Simpler interface for direct usage without the full blob detection pipeline.
+    
+    Args:
+        img_array (np.ndarray): Input image (2D grayscale or 3D RGB)
+        diameter (int): Estimated cell/particle diameter in pixels
+        model_type (str): Cellpose model ('cyto3', 'cyto', 'nuclei', 'cpsam')
+        gpu (bool): Use GPU acceleration
+        min_diameter (float): Minimum particle diameter to keep (pixels)
+        max_diameter (float): Maximum particle diameter to keep (pixels)
+        flow_threshold (float): Cellpose flow threshold (0.0-1.0)
+        cellprob_threshold (float): Cellpose cell probability threshold
+        channels (list): [cytoplasm, nucleus] channel indices
+        min_size (int): Minimum size in pixels (alternative to min_diameter)
+    
+    Returns:
+        dict: {
+            'boxes': list of (x1, y1, x2, y2) tuples,
+            'areas': list of pixel areas,
+            'diameters': list of equivalent diameters,
+            'filtered_count': number of detections after filtering,
+            'masks': raw Cellpose masks array
+        }
+    """
+    if not CELLPOSE_AVAILABLE:
+        raise ImportError("Cellpose not available. Install with: pip install cellpose")
+    
+    # Convert to float32
+    img = img_array.astype(np.float32)
+    
+    # Handle grayscale -> RGB conversion
+    if len(img.shape) == 2:
+        img = np.stack([img, img, img], axis=2)
+    
+    # Normalize to [0,1]
+    img_min, img_max = float(img.min()), float(img.max())
+    if img_max > img_min:
+        img = (img - img_min) / (img_max - img_min)
+    else:
+        print("[CELLPOSE] Warning: constant image, returning empty results")
+        return {'boxes': [], 'areas': [], 'diameters': [], 'filtered_count': 0, 'masks': None}
+    
+    # Load or use cached model
+    cache_key = (model_type, gpu)
+    if cache_key not in _CELLPOSE_MODEL_CACHE:
+        print(f"[CELLPOSE] Loading model: {model_type} (GPU={gpu})...")
+        _CELLPOSE_MODEL_CACHE[cache_key] = models.CellposeModel(pretrained_model=model_type, gpu=gpu)
+        print(f"[CELLPOSE] Model loaded and cached.")
+    else:
+        print(f"[CELLPOSE] Using cached model: {model_type} (GPU={gpu})")
+    
+    model = _CELLPOSE_MODEL_CACHE[cache_key]
+    
+    # Run Cellpose
+    print(f"[CELLPOSE] Running inference with diameter={diameter}, flow={flow_threshold}, cellprob={cellprob_threshold}")
+    try:
+        eval_kwargs = {
+            'channels': channels,
+            'diameter': diameter,
+            'flow_threshold': flow_threshold,
+            'cellprob_threshold': cellprob_threshold
+        }
+        
+        if min_size is not None:
+            eval_kwargs['min_size'] = min_size
+        
+        res = model.eval(img, **eval_kwargs)
+        
+        # Handle different return formats
+        if len(res) == 4:
+            masks, flows, styles, diams = res
+        else:
+            masks, flows, styles = res
+            
+    except Exception as e:
+        print(f"[CELLPOSE] Detection failed: {e}")
+        return {'boxes': [], 'areas': [], 'diameters': [], 'filtered_count': 0, 'masks': None}
+    
+    # Convert masks to boxes and areas
+    boxes, areas = _masks_to_boxes_and_areas(masks)
+    
+    # Filter by diameter range
+    filtered_boxes = []
+    filtered_areas = []
+    filtered_diameters = []
+    
+    for box, area in zip(boxes, areas):
+        equiv_diam = _area_to_equiv_diameter(area)
+        
+        if min_diameter <= equiv_diam <= max_diameter:
+            filtered_boxes.append(box)
+            filtered_areas.append(area)
+            filtered_diameters.append(equiv_diam)
+    
+    print(f"[CELLPOSE] Detected {len(boxes)} objects, {len(filtered_boxes)} after filtering ({min_diameter}-{max_diameter}px)")
+    
+    return {
+        'boxes': filtered_boxes,
+        'areas': filtered_areas,
+        'diameters': filtered_diameters,
+        'filtered_count': len(filtered_boxes),
+        'masks': masks,
+        'raw_boxes': boxes,
+        'raw_areas': areas
+    }
 
 
 def _detect_blobs_watershed(img_norm, img_orig, min_thresh, min_area, **kwargs):
@@ -3425,7 +3543,6 @@ def load_and_queue(json_path, target_id=None,
     - 'offline': Offline mode (use existing scan)
     - 'analysis-only': Analysis-only mode (use existing scan, return results)
     """
-    plt.close('all')
     
     # 0) Clear caches
     if 'remote_handler' in globals():
@@ -3618,9 +3735,6 @@ def load_and_queue(json_path, target_id=None,
         params['execution_params'],
         fine_scans_tables=fine_scans_tables
     )
-
-    time.sleep(5)
-    plt.close('all')
     
     # D. Run (Will skip if mode != real)
     run_fine_scans(is_real)
